@@ -1,9 +1,334 @@
-const firebaseConfig = {
-  apiKey: "AIzaSyDxmaNtC2tkib3wQSHjW4iCNHwMcJRJ46I",
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black">
+    <title>Helmet Inventory</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.0/build/qrcode.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js"></script>
+    <style>
+        body { padding: 10px; }
+        .main-buttons { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+        .bottom-menu { position: fixed; bottom: 0; width: 100%; background: #f8f9fa; padding: 10px; display: flex; justify-content: space-around; }
+        .hidden { display: none; }
+        #video { width: 100%; height: auto; }
+        #scanner-password { margin-bottom: 10px; }
+    </style>
+</head>
+<body>
+    <div id="main-screen">
+        <h1>Helmet Inventory</h1>
+        <div class="main-buttons">
+            <button class="btn btn-primary btn-lg" onclick="showSection('issue-return')">Issue/Return</button>
+            <button class="btn btn-primary btn-lg" onclick="startScanner('general')">QR Scanner</button>
+            <button class="btn btn-primary btn-lg" onclick="showSection('recon-receive')">Recon/Receive</button>
+            <button class="btn btn-primary btn-lg" onclick="showSection('add-helmet')">Add Helmets</button>
+        </div>
+    </div>
+
+    <div id="dashboard" class="hidden">
+        <h2>Dashboard</h2>
+        <canvas id="totalChart"></canvas>
+        <canvas id="teamChart"></canvas>
+        <canvas id="sizeChart"></canvas>
+        <canvas id="brandChart"></canvas>
+        <canvas id="reconDueChart"></canvas>
+        <canvas id="retireDueChart"></canvas>
+    </div>
+
+    <div id="inventory" class="hidden">
+        <h2>Inventory</h2>
+        <input type="text" id="search" placeholder="Search..." oninput="loadInventory()">
+        <ul id="inventory-list" class="list-group"></ul>
+    </div>
+
+    <div id="helmet-profile" class="hidden">
+        <h2>Helmet Profile</h2>
+        <div id="profile-details"></div>
+        <button class="btn btn-secondary" onclick="generateQR()">Print QR</button>
+        <div id="qr-canvas"></div>
+        <form id="edit-form">
+            <input type="text" id="edit-brand" placeholder="Brand">
+            <input type="text" id="edit-size" placeholder="Size">
+            <input type="number" id="edit-initial" placeholder="Initial Season">
+            <input type="number" id="edit-next-recon" placeholder="Next Recon">
+            <input type="text" id="edit-location" placeholder="Location">
+            <input type="text" id="edit-status" placeholder="Status">
+            <input type="text" id="edit-player" placeholder="Player">
+            <input type="text" id="edit-team" placeholder="Team">
+            <button type="button" class="btn btn-success" onclick="updateHelmet()">Save</button>
+        </form>
+    </div>
+
+    <div id="add-helmet" class="hidden">
+        <h2>Add Helmet</h2>
+        <form>
+            <input type="text" id="brand" placeholder="Brand" required>
+            <input type="text" id="size" placeholder="Size" required>
+            <input type="number" id="initial-season" placeholder="Initial Season (e.g., 2026)" required>
+            <button type="button" class="btn btn-success" onclick="addHelmet()">Add</button>
+        </form>
+    </div>
+
+    <div id="issue-return" class="hidden">
+        <h2>Issue/Return</h2>
+        <button class="btn btn-primary" onclick="startScanner('issue')">Scan to Issue/Return</button>
+        <form id="issue-form" class="hidden">
+            <input type="text" id="player" placeholder="Player">
+            <input type="text" id="team" placeholder="Team">
+            <button type="button" class="btn btn-success" onclick="issueHelmet()">Issue</button>
+            <button type="button" class="btn btn-warning" onclick="returnHelmet()">Return</button>
+        </form>
+    </div>
+
+    <div id="recon-receive" class="hidden">
+        <h2>Recon/Receive</h2>
+        <button class="btn btn-primary" onclick="startScanner('recon')">Scan for Recon/Receive</button>
+        <div id="recon-actions" class="hidden">
+            <button class="btn btn-warning" onclick="sendRecon()">Send to Recon</button>
+            <button class="btn btn-success" onclick="receiveRecon()">Receive from Recon</button>
+        </div>
+    </div>
+
+    <div id="scanner" class="hidden">
+        <h2>QR Scanner</h2>
+        <input type="password" id="scanner-password" placeholder="Enter staff password">
+        <button class="btn btn-primary" onclick="checkPassword()">Unlock Scanner</button>
+        <video id="video" class="hidden"></video>
+        <canvas id="canvas" class="hidden"></canvas>
+        <button class="btn btn-secondary" onclick="stopScanner()">Stop</button>
+    </div>
+
+    <div class="bottom-menu">
+        <button class="btn btn-link" onclick="showSection('dashboard')">Dashboard</button>
+        <button class="btn btn-link" onclick="showSection('inventory')">Inventory</button>
+        <button class="btn btn-link" onclick="showSection('helmet-profile')">Helmet Profile</button>
+    </div>
+
+    <script>
+        // PASTE YOUR FIREBASE CONFIG HERE
+        const firebaseConfig = {  apiKey: "AIzaSyDxmaNtC2tkib3wQSHjW4iCNHwMcJRJ46I",
   authDomain: "helmetinventory.firebaseapp.com",
   projectId: "helmetinventory",
   storageBucket: "helmetinventory.firebasestorage.app",
   messagingSenderId: "726988468505",
   appId: "1:726988468505:web:14d15ad12398e93faa5588",
   measurementId: "G-WXNTQJLMBX"
-};
+            // e.g., apiKey: "YOUR_API_KEY", authDomain: "your-project.firebaseapp.com", etc.
+        };
+        const app = firebase.initializeApp(firebaseConfig);
+        const db = firebase.firestore(app);
+        const auth = firebase.auth(app);
+
+        let currentHelmetId = null;
+        let scannerMode = 'general'; // 'general', 'issue', 'recon'
+        let videoStream = null;
+        const staffPassword = 'footballstaff'; // Change if needed
+
+        auth.signInAnonymously().catch(console.error);
+
+        function showSection(section) {
+            document.querySelectorAll('div[id]').forEach(div => div.classList.add('hidden'));
+            document.getElementById(section).classList.remove('hidden');
+            if (section === 'dashboard') loadDashboard();
+            if (section === 'inventory') loadInventory();
+            if (section === 'helmet-profile') loadProfile(currentHelmetId);
+            if (section === 'main-screen') document.getElementById('main-screen').classList.remove('hidden');
+        }
+
+        function addHelmet() {
+            const brand = document.getElementById('brand').value;
+            const size = document.getElementById('size').value;
+            const initial = parseInt(document.getElementById('initial-season').value);
+            if (!brand || !size || isNaN(initial)) return alert('Invalid input');
+
+            const helmetId = Date.now().toString();
+            const nextRecon = initial + 2;
+            const retire = initial + 10;
+            db.collection('helmets').doc(helmetId).set({
+                helmetId, brand, size, initialSeason: initial, lastRecon: null, nextRecon, retire, location: 'storage', status: 'available', player: null, team: null
+            }).then(() => {
+                alert('Helmet added');
+                showSection('main-screen');
+            });
+        }
+
+        function loadInventory() {
+            const search = document.getElementById('search').value.toLowerCase();
+            const list = document.getElementById('inventory-list');
+            list.innerHTML = '';
+            db.collection('helmets').get().then(snapshot => {
+                snapshot.forEach(doc => {
+                    const data = doc.data();
+                    if (search && !Object.values(data).some(v => v && v.toString().toLowerCase().includes(search))) return;
+                    const item = document.createElement('li');
+                    item.classList.add('list-group-item');
+                    item.innerText = `${data.helmetId} - ${data.brand} ${data.size} (${data.status})`;
+                    item.onclick = () => { currentHelmetId = data.helmetId; showSection('helmet-profile'); };
+                    list.appendChild(item);
+                });
+            });
+        }
+
+        function loadProfile(id) {
+            if (!id) return alert('No helmet selected');
+            db.collection('helmets').doc(id).get().then(doc => {
+                const data = doc.data();
+                document.getElementById('profile-details').innerHTML = `
+                    ID: ${data.helmetId}<br>Brand: ${data.brand}<br>Size: ${data.size}<br>Initial: ${data.initialSeason}<br>Last Recon: ${data.lastRecon || 'N/A'}<br>Next Recon: ${data.nextRecon}<br>Retire: ${data.retire}<br>Location: ${data.location}<br>Status: ${data.status}<br>Player: ${data.player || 'N/A'}<br>Team: ${data.team || 'N/A'}
+                `;
+                document.getElementById('edit-brand').value = data.brand;
+                document.getElementById('edit-size').value = data.size;
+                document.getElementById('edit-initial').value = data.initialSeason;
+                document.getElementById('edit-next-recon').value = data.nextRecon;
+                document.getElementById('edit-location').value = data.location;
+                document.getElementById('edit-status').value = data.status;
+                document.getElementById('edit-player').value = data.player || '';
+                document.getElementById('edit-team').value = data.team || '';
+            });
+        }
+
+        function updateHelmet() {
+            const updates = {
+                brand: document.getElementById('edit-brand').value,
+                size: document.getElementById('edit-size').value,
+                initialSeason: parseInt(document.getElementById('edit-initial').value),
+                nextRecon: parseInt(document.getElementById('edit-next-recon').value),
+                location: document.getElementById('edit-location').value,
+                status: document.getElementById('edit-status').value,
+                player: document.getElementById('edit-player').value || null,
+                team: document.getElementById('edit-team').value || null
+            };
+            updates.retire = updates.initialSeason + 10;
+            db.collection('helmets').doc(currentHelmetId).update(updates).then(() => {
+                alert('Updated');
+                loadProfile(currentHelmetId);
+            });
+        }
+
+        function startScanner(mode) {
+            scannerMode = mode;
+            showSection('scanner');
+        }
+
+        function checkPassword() {
+            if (document.getElementById('scanner-password').value !== staffPassword) return alert('Incorrect password');
+            document.getElementById('scanner-password').classList.add('hidden');
+            document.querySelector('#scanner button[onclick="checkPassword()"]').classList.add('hidden');
+            document.getElementById('video').classList.remove('hidden');
+            navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } }).then(stream => {
+                videoStream = stream;
+                const video = document.getElementById('video');
+                video.srcObject = stream;
+                video.play();
+                requestAnimationFrame(scanQR);
+            }).catch(err => alert('Camera access denied: ' + err));
+        }
+
+        function scanQR() {
+            const video = document.getElementById('video');
+            const canvas = document.getElementById('canvas');
+            if (video.videoWidth === 0) return requestAnimationFrame(scanQR);
+            canvas.width = video.videoWidth;
+            canvas.height = video.videoHeight;
+            const ctx = canvas.getContext('2d');
+            ctx.drawImage(video, 0, 0);
+            const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+            const code = jsQR(imageData.data, canvas.width, canvas.height);
+            if (code) {
+                stopScanner();
+                currentHelmetId = code.data;
+                handleScan();
+            } else {
+                requestAnimationFrame(scanQR);
+            }
+        }
+
+        function stopScanner() {
+            if (videoStream) videoStream.getTracks().forEach(track => track.stop());
+            showSection('main-screen');
+        }
+
+        function handleScan() {
+            if (scannerMode === 'general') showSection('helmet-profile');
+            else if (scannerMode === 'issue') {
+                document.getElementById('issue-form').classList.remove('hidden');
+            } else if (scannerMode === 'recon') {
+                document.getElementById('recon-actions').classList.remove('hidden');
+            }
+        }
+
+        function issueHelmet() {
+            const player = document.getElementById('player').value;
+            const team = document.getElementById('team').value;
+            db.collection('helmets').doc(currentHelmetId).update({ status: 'issued', player, team, location: 'with player' }).then(() => {
+                alert('Issued');
+                showSection('main-screen');
+            });
+        }
+
+        function returnHelmet() {
+            db.collection('helmets').doc(currentHelmetId).update({ status: 'available', player: null, team: null, location: 'storage' }).then(() => {
+                alert('Returned');
+                showSection('main-screen');
+            });
+        }
+
+        function sendRecon() {
+            db.collection('helmets').doc(currentHelmetId).update({ status: 'sent', location: 'recon' }).then(() => {
+                alert('Sent for Recon');
+                showSection('main-screen');
+            });
+        }
+
+        function receiveRecon() {
+            const currentYear = new Date().getFullYear();
+            db.collection('helmets').doc(currentHelmetId).update({ status: 'available', lastRecon: currentYear, nextRecon: currentYear + 2, location: 'storage' }).then(() => {
+                alert('Received from Recon');
+                showSection('main-screen');
+            });
+        }
+
+        function generateQR() {
+            const qrDiv = document.getElementById('qr-canvas');
+            qrDiv.innerHTML = '';
+            QRCode.toCanvas(document.createElement('canvas'), currentHelmetId, { scale: 8 }, (err, canvas) => {
+                if (err) return;
+                qrDiv.appendChild(canvas);
+                alert('Print this page for QR code');
+            });
+        }
+
+        function loadDashboard() {
+            const currentYear = new Date().getFullYear();
+            db.collection('helmets').get().then(snapshot => {
+                const data = snapshot.docs.map(doc => doc.data());
+                const total = data.length;
+
+                const teams = data.reduce((acc, h) => { acc[h.team || 'None'] = (acc[h.team || 'None'] || 0) + 1; return acc; }, {});
+                const sizes = data.reduce((acc, h) => { acc[h.size] = (acc[h.size] || 0) + 1; return acc; }, {});
+                const brands = data.reduce((acc, h) => { acc[h.brand] = (acc[h.brand] || 0) + 1; return acc; }, {});
+                const reconDue = data.filter(h => h.nextRecon <= currentYear).length;
+                const retireDue = data.filter(h => h.retire <= currentYear).length;
+
+                new Chart(document.getElementById('totalChart'), { type: 'pie', data: { labels: ['Total Helmets'], datasets: [{ data: [total] }] } });
+                new Chart(document.getElementById('teamChart'), { type: 'bar', data: { labels: Object.keys(teams), datasets: [{ label: 'Helmets per Team', data: Object.values(teams) }] } });
+                new Chart(document.getElementById('sizeChart'), { type: 'bar', data: { labels: Object.keys(sizes), datasets: [{ label: 'Helmets per Size', data: Object.values(sizes) }] } });
+                new Chart(document.getElementById('brandChart'), { type: 'bar', data: { labels: Object.keys(brands), datasets: [{ label: 'Helmets per Brand', data: Object.values(brands) }] } });
+                new Chart(document.getElementById('reconDueChart'), { type: 'pie', data: { labels: ['Due for Recon'], datasets: [{ data: [reconDue] }] } });
+                new Chart(document.getElementById('retireDueChart'), { type: 'pie', data: { labels: ['Due for Retire'], datasets: [{ data: [retireDue] }] } });
+            });
+        }
+
+        showSection('main-screen');
+    </script>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>
